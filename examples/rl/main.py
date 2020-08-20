@@ -108,19 +108,19 @@ def sample_and_train(
 def train(
     policy_optimizer : flax.optim.base.Optimizer, 
     target_model : nn.base.Model,
-    steps_total : int):
+    steps_total : int,
+    num_agents : int):
     scores = []
-    num_processes = 16
-    print(f"Using {num_processes} environments")
+    print(f"Using {num_agents} environments")
     memory = NumpyMemory(MEMORY_SIZE)
-    simulators = [RemoteSimulator() for i in range(num_processes)]
+    simulators = [RemoteSimulator() for i in range(num_agents)]
     t1 = time.time()
-    for s in range(steps_total // num_processes):
+    for s in range(steps_total // num_agents):
         # print(s)
-        if (s + 1) % (10000 // num_processes) == 0:
-            print(f"Frames processed {s*num_processes}, time elapsed {time.time()-t1}")
+        if (s + 1) % (10000 // num_agents) == 0:
+            print(f"Frames processed {s*num_agents}, time elapsed {time.time()-t1}")
             t1 = time.time()
-        if (s + 1) % (50000 // num_processes) == 0:
+        if (s + 1) % (50000 // num_agents) == 0:
             test(1, policy_optimizer.target, render=False)
 
         # 1. collect the states from simulators
@@ -136,7 +136,7 @@ def train(
             actions = eps_greedy_action(
                 states,
                 policy_optimizer,
-                s * num_processes,
+                s * num_agents,
                 EPS_START,
                 EPS_END,
                 EPS_DECAY,
@@ -146,21 +146,21 @@ def train(
             action = actions[i]
             sim.conn.send(action)
 
-        # 3. run num_processes train steps
+        # 3. run num_agents train steps
         if len(memory) > INITIAL_MEMORY:
             # losses = []
-            # for i in range(num_processes):
+            # for i in range(num_agents):
             for i in range(1):
                 with jax.profiler.TraceContext("train_step"):
                     policy_optimizer, loss = sample_and_train(
                         memory,
                         policy_optimizer,
                         target_model,
-                        num_processes * BATCH_SIZE,
+                        num_agents * BATCH_SIZE,
                         GAMMA,
                     )
                     # loss.block_until_ready()
-            if s * num_processes % TARGET_UPDATE <= num_processes:
+            if s * num_agents % TARGET_UPDATE <= num_agents:
                 # copy policy model parameters to target model
                 target_model = policy_optimizer.target
 
@@ -183,7 +183,7 @@ TARGET_UPDATE = 1000
 LR = 1e-4
 INITIAL_MEMORY = 10000
 MEMORY_SIZE = 10 * INITIAL_MEMORY
-STEPS_TOTAL = 4*int(1e6)
+
 
 key = jax.random.PRNGKey(0)
 key, subkey = jax.random.split(key)
@@ -193,5 +193,7 @@ target_model = policy_model
 del policy_model
 
 if __name__ == "__main__":
-    policy_optimizer, scores, mem = train(policy_optimizer, 
-                                        target_model, STEPS_TOTAL)
+    num_agents = 128
+    total_frames = 4000000
+    policy_optimizer, scores, mem = train(policy_optimizer, target_model, 
+                                    total_frames, num_agents)
