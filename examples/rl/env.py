@@ -16,17 +16,17 @@ class FrameStack:
   def reset(self):
     ob = self.preproc.reset()
     for _ in range(self.num_frames):
-        self.frames.append(ob)
+      self.frames.append(ob)
     return self._get_array()
 
   def step(self, action: int):
-      ob, reward, done, info = self.preproc.step(action)
-      self.frames.append(ob)
-      return self._get_array(), reward, done, info
+    ob, reward, done, info = self.preproc.step(action)
+    self.frames.append(ob)
+    return self._get_array(), reward, done, info
 
   def _get_array(self):
-      assert len(self.frames) == self.num_frames
-      return onp.concatenate(self.frames, axis=-1)
+    assert len(self.frames) == self.num_frames
+    return onp.concatenate(self.frames, axis=-1)
 
 def create_env():
   env = gym.make("PongNoFrameskip-v4")

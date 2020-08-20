@@ -3,10 +3,11 @@ from flax import nn
 import jax.numpy as jnp
 
 class Q(flax.nn.Module):
-  ''' Same as DQN on @jmichaux Github:
-https://github.com/jmichaux/dqn-pytorch/blob/master/models.py
-different than DeepMind's one
- '''
+  ''' 
+  Same as DQN on @jmichaux Github:
+  https://github.com/jmichaux/dqn-pytorch/blob/master/models.py
+  different than DeepMind's one
+  '''
   def apply(self, x):
     x = x.astype(jnp.float32) / 255.
     dtype = jnp.float32
