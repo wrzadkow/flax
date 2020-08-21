@@ -134,9 +134,9 @@ def train(
         EPS_END,
         EPS_DECAY)
       # block_until_ready() for profiling used in greedy_actions()
-    for i, sim in enumerate(simulators):
-      action = actions[i]
-      sim.conn.send(action)
+      for i, sim in enumerate(simulators):
+        action = actions[i]
+        sim.conn.send(action)
 
     # 3. run num_agents train steps
     if len(memory) > INITIAL_MEMORY:
