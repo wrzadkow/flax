@@ -80,20 +80,6 @@ def train_step(
   return optimizer, loss
 
 
-def sample_and_train(
-  memory : NumpyMemory, 
-  policy_optimizer : flax.optim.base.Optimizer, 
-  target_model : nn.base.Model,
-  batch_size : int, 
-  gamma : float):
-  with jax.profiler.TraceContext("sampling"):
-    transitions = memory.sample(batch_size)
-    cur_states, next_states, actions, rewards, terminal_mask = transitions
-  policy_optimizer, loss = train_step(policy_optimizer, target_model,
-                                      transitions, gamma)
-  return policy_optimizer, loss
-
-
 def train(
   policy_optimizer : flax.optim.base.Optimizer, 
   target_model : nn.base.Model,
@@ -138,13 +124,11 @@ def train(
     if len(memory) > INITIAL_MEMORY:
       # losses = []
       with jax.profiler.TraceContext("train_step"):
-        policy_optimizer, loss = sample_and_train(
-          memory,
-          policy_optimizer,
-          target_model,
-          num_agents * BATCH_SIZE,
-          GAMMA)
-        # loss.block_until_ready()
+        with jax.profiler.TraceContext("sampling"):
+          transitions = transitions = memory.sample(num_agents * BATCH_SIZE)
+        policy_optimizer, loss = train_step(policy_optimizer, target_model,
+                                            transitions, GAMMA)
+        # optimizer.step.block_until_ready()
       if s * num_agents % TARGET_UPDATE <= num_agents:
         # copy policy model parameters to target model
         target_model = policy_optimizer.target
