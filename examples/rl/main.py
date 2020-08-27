@@ -141,16 +141,14 @@ def train(
     # 3. run num_agents train steps
     if len(memory) > INITIAL_MEMORY:
       # losses = []
-      # for i in range(num_agents):
-      for i in range(1):
-        with jax.profiler.TraceContext("train_step"):
-          policy_optimizer, loss = sample_and_train(
-            memory,
-            policy_optimizer,
-            target_model,
-            num_agents * BATCH_SIZE,
-            GAMMA)
-          # loss.block_until_ready()
+      with jax.profiler.TraceContext("train_step"):
+        policy_optimizer, loss = sample_and_train(
+          memory,
+          policy_optimizer,
+          target_model,
+          num_agents * BATCH_SIZE,
+          GAMMA)
+        # loss.block_until_ready()
       if s * num_agents % TARGET_UPDATE <= num_agents:
         # copy policy model parameters to target model
         target_model = policy_optimizer.target
