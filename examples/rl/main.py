@@ -5,6 +5,7 @@ import jax.random
 import flax
 from flax import nn
 import time
+from typing import Tuple
 
 from numpy_memory import NumpyMemory
 from model import create_model, create_optimizer
@@ -16,11 +17,14 @@ from test_episodes import test
 def train_step(
   optimizer : flax.optim.base.Optimizer,
   target_model : nn.base.Model,
-  cur_states: onp.ndarray,
-  next_states: onp.ndarray,
-  actions: onp.ndarray,
-  rewards: onp.ndarray,
-  terminal_mask : onp.ndarray,
+  transitions : Tuple[onp.ndarray, onp.ndarray, onp.ndarray, 
+                      onp.ndarray, onp.ndarray],
+  # target_model : nn.base.Model,
+  # cur_states: onp.ndarray,
+  # next_states: onp.ndarray,
+  # actions: onp.ndarray,
+  # rewards: onp.ndarray,
+  # terminal_mask : onp.ndarray,
   gamma : float):
   """
   Compilable train step. The loop over num_agents batches is included here
@@ -29,11 +33,12 @@ def train_step(
   Args:
     optimizer: optimizer for the policy model
     target_model: target model
-    cur_states: shape (batch_size*num_agents, 84, 84, 4)
-    next_states: shape (batch_size*num_agents, 84, 84, 4)
-    actions: shape (batch_size*num_agents, )
-    rewards: shape (batch_size*num_agents, )
-    terminal_mask: (batch_size*num_agents, )
+    transitions: Tuple of the following five elements forming the experience: 
+                  cur_states: shape (batch_size*num_agents, 84, 84, 4)
+                  next_states: shape (batch_size*num_agents, 84, 84, 4)
+                  actions: shape (batch_size*num_agents, )
+                  rewards: shape (batch_size*num_agents, )
+                  terminal_mask: (batch_size*num_agents, )
     gamma: discount factor
 
   Returns:
@@ -41,24 +46,17 @@ def train_step(
     loss: loss summed over training steps
   """
   print("compile")
-  batch = cur_states, next_states, actions, rewards, terminal_mask
+  # batch = cur_states, next_states, actions, rewards, terminal_mask
   batch_size = BATCH_SIZE
-  iterations = cur_states.shape[0] // batch_size
-  batch = jax.tree_map(
-    lambda x: x.reshape((iterations, batch_size) + x.shape[1:]), batch)
+  iterations = transitions[0].shape[0] // batch_size
+  transitions = jax.tree_map(
+    lambda x: x.reshape((iterations, batch_size) + x.shape[1:]), transitions)
   loss = 0.0
-  for row in zip(*batch):
-    cur_states, next_states, actions, rewards, terminal_mask = row
+  for batch in zip(*transitions):
+    # cur_states, next_states, actions, rewards, terminal_mask = row
 
-    def loss_fn(
-      policy_model,
-      target_model,
-      cur_states,
-      next_states,
-      actions,
-      rewards,
-      terminal_mask,
-      gamma):
+    def loss_fn(policy_model, target_model, batch, gamma):
+      cur_states, next_states, actions, rewards, terminal_mask = batch
       out_cur, out_next = policy_model(cur_states), target_model(next_states)
       best_continuations = jnp.max(out_next, axis=1)
       # zero best continuation for terminal_states using mask
@@ -67,24 +65,16 @@ def train_step(
       targets = rewards + gamma * best_continuations
       current_values = jax.vmap(lambda x, a: x[a])(out_cur, actions)
 
-      def hubber_loss(x, y):
+      def huber_loss(x, y):
         error = x - y
         loss = jnp.where(
           jnp.abs(error) > 1.0, jnp.abs(error) - 0.5, 0.5 * jnp.square(error))
         return loss
 
-      return jnp.mean(hubber_loss(targets, current_values), axis=0)
+      return jnp.mean(huber_loss(targets, current_values), axis=0)
 
     grad_fn = jax.value_and_grad(loss_fn)
-    l, grad = grad_fn(
-      optimizer.target,
-      target_model,
-      cur_states,
-      next_states,
-      actions,
-      rewards,
-      terminal_mask,
-      gamma)
+    l, grad = grad_fn(optimizer.target, target_model, batch, gamma)
     loss += l
     optimizer = optimizer.apply_gradient(grad)
   return optimizer, loss
@@ -99,15 +89,8 @@ def sample_and_train(
   with jax.profiler.TraceContext("sampling"):
     transitions = memory.sample(batch_size)
     cur_states, next_states, actions, rewards, terminal_mask = transitions
-  policy_optimizer, loss = train_step(
-    policy_optimizer,
-    target_model,
-    cur_states,
-    next_states,
-    actions,
-    rewards,
-    terminal_mask,
-    gamma)
+  policy_optimizer, loss = train_step(policy_optimizer, target_model,
+                                      transitions, gamma)
   return policy_optimizer, loss
 
 
