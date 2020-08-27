@@ -23,9 +23,22 @@ def train_step(
   terminal_mask : onp.ndarray,
   gamma : float):
   """
-  states: shape (minibatch, 84, 84, 4)
-  actions: shape (minibatch, )
-  rewards: shape (minibatch, )
+  Compilable train step. The loop over num_agents batches is included here
+  (as opposed to the Python training loop) for increased speed.
+
+  Args:
+    optimizer: optimizer for the policy model
+    target_model: target model
+    cur_states: shape (batch_size*num_agents, 84, 84, 4)
+    next_states: shape (batch_size*num_agents, 84, 84, 4)
+    actions: shape (batch_size*num_agents, )
+    rewards: shape (batch_size*num_agents, )
+    terminal_mask: (batch_size*num_agents, )
+    gamma: discount factor
+
+  Returns:
+    optimizer: new optimizer after the parameters update 
+    loss: loss summed over training steps
   """
   print("compile")
   batch = cur_states, next_states, actions, rewards, terminal_mask
