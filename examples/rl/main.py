@@ -19,15 +19,8 @@ def train_step(
   target_model : nn.base.Model,
   transitions : Tuple[onp.ndarray, onp.ndarray, onp.ndarray, 
                       onp.ndarray, onp.ndarray],
-  # target_model : nn.base.Model,
-  # cur_states: onp.ndarray,
-  # next_states: onp.ndarray,
-  # actions: onp.ndarray,
-  # rewards: onp.ndarray,
-  # terminal_mask : onp.ndarray,
   gamma : float):
-  """
-  Compilable train step. The loop over num_agents batches is included here
+  """Compilable train step. The loop over num_agents batches is included here
   (as opposed to the Python training loop) for increased speed.
 
   Args:
@@ -46,26 +39,25 @@ def train_step(
     loss: loss summed over training steps
   """
   print("compile")
-  # batch = cur_states, next_states, actions, rewards, terminal_mask
   batch_size = BATCH_SIZE
   iterations = transitions[0].shape[0] // batch_size
   transitions = jax.tree_map(
     lambda x: x.reshape((iterations, batch_size) + x.shape[1:]), transitions)
   loss = 0.0
   for batch in zip(*transitions):
-    # cur_states, next_states, actions, rewards, terminal_mask = row
 
     def loss_fn(policy_model, target_model, batch, gamma):
+      """Compute loss from the difference between LHS and RHS of Bellman eq."""
       cur_states, next_states, actions, rewards, terminal_mask = batch
       out_cur, out_next = policy_model(cur_states), target_model(next_states)
       best_continuations = jnp.max(out_next, axis=1)
-      # zero best continuation for terminal_states using mask
+      #best continuation for terminal_states is zero
       best_continuations = jnp.where(terminal_mask, 0.0, best_continuations)
-      # right-hand-side Bellman equation
-      targets = rewards + gamma * best_continuations
-      current_values = jax.vmap(lambda x, a: x[a])(out_cur, actions)
+      targets = rewards + gamma * best_continuations #RHS of Bellman eq.
+      current_values = jax.vmap(lambda x, a: x[a])(out_cur, actions) #LHS
 
       def huber_loss(x, y):
+        """Squared loss for |x-y| < 1, linear loss elsewhere."""
         error = x - y
         loss = jnp.where(
           jnp.abs(error) > 1.0, jnp.abs(error) - 0.5, 0.5 * jnp.square(error))
@@ -77,6 +69,7 @@ def train_step(
     l, grad = grad_fn(optimizer.target, target_model, batch, gamma)
     loss += l
     optimizer = optimizer.apply_gradient(grad)
+
   return optimizer, loss
 
 
@@ -85,7 +78,19 @@ def train(
   target_model : nn.base.Model,
   steps_total : int,
   num_agents : int):
-  scores = []
+  """Main training loop.
+
+  Args:
+    optimizer: optimizer for the policy model
+    target_model: target model
+    steps total: total number of frames (env steps) to train on
+    num_agents: number of separate processes with agents running the envs  
+
+  Returns:
+    policy_optimizer: optimizer for the policy model, containing the trained
+                      parameters
+    memory: NumpyMemory object containing MEMORY_SIZE last frames seen
+  """
   print(f"Using {num_agents} environments")
   memory = NumpyMemory(MEMORY_SIZE)
   simulators = [RemoteSimulator() for i in range(num_agents)]
@@ -140,7 +145,7 @@ def train(
         sample = sim.conn.recv()
         memory.push(*sample)
 
-  return policy_optimizer, scores, memory
+  return policy_optimizer, memory
 
 
 BATCH_SIZE = 32
@@ -164,5 +169,5 @@ del policy_model
 if __name__ == "__main__":
   num_agents = 128
   total_frames = 4000000
-  policy_optimizer, scores, mem = train(policy_optimizer, target_model, 
+  policy_optimizer, mem = train(policy_optimizer, target_model, 
                   total_frames, num_agents)
