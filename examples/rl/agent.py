@@ -23,9 +23,4 @@ def eps_greedy_action(state, optimizer,
     greedy_actions = jax.device_get(greedy_actions)
     return greedy_actions
     # return greedy_actions.block_until_ready()
-  # r = onp.random.uniform(size=(batch_size, ))
-  # random_greedy_mask =  r < eps_threshold
-  # rand_actions = onp.random.randint(low=0, high=4, size=(batch_size, ))
-  # greedy_actions, out = greedy_action(optimizer.target, state)
-  # actions = onp.where(random_greedy_mask, rand_actions, greedy_actions)
-  # return actions
+    
