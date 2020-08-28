@@ -74,19 +74,31 @@ def train_step(
 
   return optimizer, loss
 
-def thread_inference(q : Queue, simulators : List):
-  """Worker function for a separate consumer thread used for inference
-  in order to maximize the GPU/TPU usage."""
+def thread_inference(q1 : Queue, q2: Queue, simulators : List[RemoteSimulator]):
+  """Worker function for a separate thread used for inference and running
+  the simulators in order to maximize the GPU/TPU usage."""
   while(True):
-    info = q.get()
-    arguments, simulators = info
-    states, policy_optimizer, step, eps_start, eps_end, eps_decay = arguments
+    # collect states from simulators
+    states = []
+    for sim in simulators:
+      state = sim.conn.recv()
+      states.append(state)
+    states = onp.concatenate(states, axis=0)
+
+    # perform inference
+    policy_optimizer, step = q1.get()
     actions = eps_greedy_action(states, policy_optimizer, step,
                                 EPS_START, EPS_END, EPS_DECAY)
     for i, sim in enumerate(simulators):
       action = actions[i]
       sim.conn.send(action)
-    q.task_done()
+
+    # get experience from simulators
+    experiences = []
+    for sim in simulators:
+      sample = sim.conn.recv()
+      experiences.append(sample)
+    q2.put(experiences)
 
 def train(
   policy_optimizer : flax.optim.base.Optimizer, 
@@ -109,9 +121,9 @@ def train(
   print(f"Using {num_agents} environments")
   memory = NumpyMemory(MEMORY_SIZE)
   simulators = [RemoteSimulator() for i in range(num_agents)]
-  q = Queue()
+  q1, q2 = Queue(maxsize=1), Queue(maxsize=1)
   inference_thread = threading.Thread(target=thread_inference, 
-                                      args=(q, simulators), daemon=True)
+                                      args=(q1, q2, simulators), daemon=True)
   inference_thread.start()
   t1 = time.time()
   for s in range(steps_total // num_agents):
@@ -121,24 +133,14 @@ def train(
       t1 = time.time()
     if (s + 1) % (50000 // num_agents) == 0:
       test(1, policy_optimizer.target, render=False)
-
-    # 1. collect the states from simulators
-    with jax.profiler.TraceContext("running simulators"):
-      states = []
-      for sim in simulators:
-        state = sim.conn.recv()
-        states.append(state)
-      states = onp.concatenate(states, axis=0)
-
-    # 2. epsilon - greedy actions based on collected states
+    
+    # send the up-to-date policy model and current step to inference thread 
     with jax.profiler.TraceContext("eps_greedy_actions"):
-      args = (states, policy_optimizer, s*num_agents, 
-              EPS_START,EPS_END, EPS_DECAY)
-      q.put((args, simulators))
+      step = s*num_agents
+      q1.put((policy_optimizer, step))
 
-    # 3. run num_agents train steps
+    # perform training: run num_agents train steps
     if len(memory) > INITIAL_MEMORY:
-      # losses = []
       with jax.profiler.TraceContext("train_step"):
         with jax.profiler.TraceContext("sampling"):
           transitions = transitions = memory.sample(num_agents * BATCH_SIZE)
@@ -149,13 +151,11 @@ def train(
         # copy policy model parameters to target model
         target_model = policy_optimizer.target
 
-    # 4. collect memories
-    # print("4. collect memories")
+    # collect experience from the inference thread and add them to memory
     with jax.profiler.TraceContext("collecting experience"):
-      q.join()
-      for sim in simulators:
-        sample = sim.conn.recv()
-        memory.push(*sample)
+      samples = q2.get()
+      for s in samples:
+        memory.push(*s)
 
   return policy_optimizer, memory
 
