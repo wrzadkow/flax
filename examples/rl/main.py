@@ -5,7 +5,9 @@ import jax.random
 import flax
 from flax import nn
 import time
-from typing import Tuple
+from typing import Tuple, List
+from queue import Queue
+import threading
 
 from numpy_memory import NumpyMemory
 from model import create_model, create_optimizer
@@ -72,6 +74,19 @@ def train_step(
 
   return optimizer, loss
 
+def thread_inference(q : Queue, simulators : List):
+  """Worker function for a separate consumer thread used for inference
+  in order to maximize the GPU/TPU usage."""
+  while(True):
+    info = q.get()
+    arguments, simulators = info
+    states, policy_optimizer, step, eps_start, eps_end, eps_decay = arguments
+    actions = eps_greedy_action(states, policy_optimizer, step,
+                                EPS_START, EPS_END, EPS_DECAY)
+    for i, sim in enumerate(simulators):
+      action = actions[i]
+      sim.conn.send(action)
+    q.task_done()
 
 def train(
   policy_optimizer : flax.optim.base.Optimizer, 
@@ -94,6 +109,10 @@ def train(
   print(f"Using {num_agents} environments")
   memory = NumpyMemory(MEMORY_SIZE)
   simulators = [RemoteSimulator() for i in range(num_agents)]
+  q = Queue()
+  inference_thread = threading.Thread(target=thread_inference, 
+                                      args=(q, simulators), daemon=True)
+  inference_thread.start()
   t1 = time.time()
   for s in range(steps_total // num_agents):
     # print(s)
@@ -113,17 +132,9 @@ def train(
 
     # 2. epsilon - greedy actions based on collected states
     with jax.profiler.TraceContext("eps_greedy_actions"):
-      actions = eps_greedy_action(
-        states,
-        policy_optimizer,
-        s * num_agents,
-        EPS_START,
-        EPS_END,
-        EPS_DECAY)
-      # block_until_ready() for profiling used in greedy_actions()
-      for i, sim in enumerate(simulators):
-        action = actions[i]
-        sim.conn.send(action)
+      args = (states, policy_optimizer, s*num_agents, 
+              EPS_START,EPS_END, EPS_DECAY)
+      q.put((args, simulators))
 
     # 3. run num_agents train steps
     if len(memory) > INITIAL_MEMORY:
@@ -141,6 +152,7 @@ def train(
     # 4. collect memories
     # print("4. collect memories")
     with jax.profiler.TraceContext("collecting experience"):
+      q.join()
       for sim in simulators:
         sample = sim.conn.recv()
         memory.push(*sample)
