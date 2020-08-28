@@ -3,7 +3,6 @@ import numpy as onp
 import jax.numpy as jnp
 import math
 
-@jax.jit
 def greedy_action(model, state):
   out = model(state)
   action = jnp.argmax(out, axis = 1).astype(jnp.int32)

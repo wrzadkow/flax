@@ -11,11 +11,10 @@ import threading
 
 from numpy_memory import NumpyMemory
 from model import create_model, create_optimizer
-from agent import eps_greedy_action
+from agent import eps_greedy_action, greedy_action
 from remote import RemoteSimulator
 from test_episodes import test
 
-@jax.jit
 def train_step(
   optimizer : flax.optim.base.Optimizer,
   target_model : nn.base.Model,
@@ -104,14 +103,18 @@ def train(
   policy_optimizer : flax.optim.base.Optimizer, 
   target_model : nn.base.Model,
   steps_total : int,
-  num_agents : int):
+  num_agents : int,
+  train_device, 
+  inference_device):
   """Main training loop.
 
   Args:
     optimizer: optimizer for the policy model
     target_model: target model
     steps total: total number of frames (env steps) to train on
-    num_agents: number of separate processes with agents running the envs  
+    num_agents: number of separate processes with agents running the envs
+    train_device : device used for training
+    inference_device :  device used for inference
 
   Returns:
     policy_optimizer: optimizer for the policy model, containing the trained
@@ -146,10 +149,12 @@ def train(
           transitions = transitions = memory.sample(num_agents * BATCH_SIZE)
         policy_optimizer, loss = train_step(policy_optimizer, target_model,
                                             transitions, GAMMA)
-        # optimizer.step.block_until_ready()
+        # policy_optimizer.step.block_until_ready()
       if s * num_agents % TARGET_UPDATE <= num_agents:
         # copy policy model parameters to target model
         target_model = policy_optimizer.target
+        # copy them also to inference_device
+        jax.device_put(policy_optimizer.target, device=inference_device)
 
     # collect experience from the inference thread and add them to memory
     with jax.profiler.TraceContext("collecting experience"):
@@ -181,5 +186,10 @@ del policy_model
 if __name__ == "__main__":
   num_agents = 128
   total_frames = 4000000
+  train_device = jax.devices()[0]
+  inference_device = jax.devices()[1]
+  train_step = jax.jit(train_step, device=train_device)
+  greedy_action = jax.jit(greedy_action, device=inference_device)
+  jax.device_put(policy_optimizer.target, device=train_device)
   policy_optimizer, mem = train(policy_optimizer, target_model, 
-                  total_frames, num_agents)
+                  total_frames, num_agents, train_device, inference_device)
