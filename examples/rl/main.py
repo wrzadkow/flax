@@ -184,7 +184,7 @@ target_model = policy_model
 del policy_model
 
 if __name__ == "__main__":
-  num_agents = 128
+  num_agents = 16
   total_frames = 4000000
   train_device = jax.devices()[0]
   inference_device = jax.devices()[1]
