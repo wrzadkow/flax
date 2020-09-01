@@ -17,7 +17,7 @@ def test(n_episodes: int, model: flax.nn.base.Model, render: bool = False):
     state = get_state(obs)
     total_reward = 0.0
     for t in itertools.count():
-      action, _ = greedy_action(model, state)
+      action = greedy_action(model, state)
       action = action[0]
       obs, reward, done, info = test_env.step(action)
       total_reward += reward
