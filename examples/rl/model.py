@@ -4,9 +4,10 @@ import jax.numpy as jnp
 
 class Q(flax.nn.Module):
   ''' 
-  Same as DQN on @jmichaux Github:
-  https://github.com/jmichaux/dqn-pytorch/blob/master/models.py
-  different than DeepMind's one
+  Architecture from "Human-level control through deep reinforcement learning." 
+  Nature 518, no. 7540 (2015): 529-533.
+  Note that this is different than the one from  "Playing atari with deep 
+  reinforcement learning." arxiv.org/abs/1312.5602 (2013)
   '''
   def apply(self, x):
     x = x.astype(jnp.float32) / 255.
